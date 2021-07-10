@@ -101,10 +101,12 @@ class MeshDrawer
 		// 2. Obtenemos los IDs de las variables uniformes en los shaders
 		this.mvp = gl.getUniformLocation(this.prog, 'mvp');
 		this.mv = gl.getUniformLocation(this.prog, 'mv');
-		this.matrixNormal = gl.getUniformLocation(this.prog, 'norm');
+		this.normalMatrix = gl.getUniformLocation(this.prog, 'norm');
 		this.swapYZAttrib = gl.getUniformLocation(this.prog, 'swap_yz');
 		this.showTexAttrib = gl.getUniformLocation(this.prog, 'show_tex');
 		this.sampler = gl.getUniformLocation(this.prog, 'texGPU');
+    this.dir_light = gl.getUniformLocation(this.prog, 'dir_light');
+    this.shininess = gl.getUniformLocation(this.prog, 'shininess');
 
 		// 3. Obtenemos los IDs de los atributos de los vértices en los shaders
 		this.vertPosAttrib = gl.getAttribLocation(this.prog, 'pos');
@@ -177,7 +179,7 @@ class MeshDrawer
 		// 2.1 Setear matriz model-view 
 		gl.uniformMatrix4fv(this.mv, false, matrixMV);
 		// 2.1 Setear matriz de transformación de las normales
-		gl.uniformMatrix4fv(this.normalMatrix, false, matrixNormal);
+		gl.uniformMatrix3fv(this.normalMatrix, false, matrixNormal);
 		
 		// 2.2 Setear swap YZ
 		gl.uniform1i(this.swapYZAttrib, this.swap);
@@ -241,12 +243,16 @@ class MeshDrawer
 	setLightDir( x, y, z )
 	{		
 		// [COMPLETAR] Setear variables uniformes en el fragment shader para especificar la dirección de la luz
+		  gl.useProgram( this.prog );
+      gl.uniform3f(this.dir_light, x, y, z);
 	}
 		
 	// Este método se llama al actualizar el brillo del material 
 	setShininess( shininess )
 	{		
 		// [COMPLETAR] Setear variables uniformes en el fragment shader para especificar el brillo.
+		  gl.useProgram( this.prog );
+      gl.uniform1f(this.shininess, shininess);
 	}
 }
 
@@ -264,15 +270,29 @@ class MeshDrawer
 var meshVS = `
 	attribute vec3 pos;
 	attribute vec2 a_tex;
+	attribute vec3 a_norm;
+
 	uniform mat4 mvp;
+	uniform mat4 mv;
+	uniform mat3 norm;
 	uniform bool swap_yz;
+
 	varying vec2 v_tex;
+  varying vec3 v_norm;
+  varying vec3 v_pos;
+
 	void main()
 	{
 		if (swap_yz) {
 			gl_Position = mvp * vec4(pos[0], pos[2], pos[1], 1);
+      vec4 vertPos = mv * vec4(pos[0], pos[2], pos[1], 1);
+      v_pos = vec3(vertPos) / vertPos.w;
+      v_norm = norm * vec3(a_norm[0], a_norm[2], a_norm[1]);
 		} else {
 			gl_Position = mvp * vec4(pos[0], pos[1], pos[2], 1);
+      vec4 vertPos = mv * vec4(pos[0], pos[1], pos[2], 1);
+      v_pos = vec3(vertPos) / vertPos.w;
+      v_norm = norm * a_norm;
 		}
 		v_tex = a_tex;
 	}
@@ -286,15 +306,36 @@ var meshVS = `
 
 var meshFS = `
 	precision mediump float;
+
 	uniform sampler2D texGPU;
 	uniform bool show_tex;
+  uniform vec3 dir_light;
+  uniform float shininess;
+
 	varying vec2 v_tex;
+  varying vec3 v_norm;
+  varying vec3 v_pos;
+
+  const vec4 I = vec4(1.0);
+  const vec4 Ia = vec4(1.0);
+  const vec4 Ks = vec4(1.0);
+  const vec4 Ka = vec4(0.0);
+  // const vec4 Ka = vec4(0.1, 0.5, 0.1, 1.0); // Comentar la linea de arriba y descomentar esta para probar luz ambiental
+
 	void main()
 	{
-		if (show_tex) {
-			gl_FragColor = texture2D(texGPU, v_tex);
-		} else {
-			gl_FragColor = vec4(1,0,gl_FragCoord.z*gl_FragCoord.z,1);
-		}
-	}
+      vec3 l = normalize(dir_light);
+      vec3 n = normalize(v_norm);
+      vec3 v = normalize(-v_pos);
+      vec3 h = normalize(l+v);
+      float cos_tita = dot(l, n);
+      float cos_omega = dot(h, n);
+
+      vec4 Kd = vec4(1.0);
+      if (show_tex) {
+          Kd = texture2D(texGPU, v_tex);
+      }
+
+			gl_FragColor = I * max(cos_tita, 0.0) * (Kd + (Ks * pow(max(cos_omega, 0.0), shininess)) / cos_tita) + Ia * Ka;
+  }
 `;
